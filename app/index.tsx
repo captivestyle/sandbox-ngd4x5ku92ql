@@ -3,95 +3,243 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useNormalizedModel } from '@/hooks/useNormalizedModel';
+import { Pressable } from 'react-native';
 
-function SwappingModels() {
+// Platform component
+function Platform({ position, size = [3, 0.3, 1] }: { position: [number, number, number]; size?: [number, number, number] }) {
+  return (
+    <mesh position={position}>
+      <boxGeometry args={size} />
+      <meshStandardMaterial color="#8B4513" />
+    </mesh>
+  );
+}
+
+// Kangaroo player with charge-jump mechanics
+function Kangaroo({ 
+  chargeLevel,
+  triggerJump
+}: { 
+  chargeLevel: number;
+  triggerJump: number;
+}) {
   const groupRef = useRef<THREE.Group>(null);
-  const controllerRef = useRef<THREE.Group>(null);
-  const bloomRef = useRef<THREE.Group>(null);
+  const velocityRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
+  const isGroundedRef = useRef(true);
+  const lastJumpTriggerRef = useRef(0);
 
-  const controller = useNormalizedModel(require('../public/models/controller.glb'), 4.5);
-  const bloom = useNormalizedModel(require('../public/models/bloom-logo-3d-model.glb'), 4.5);
-
-  const [showController, setShowController] = useState(true);
-  const lastSwapRef = useRef(0);
+  const kangaroo = useNormalizedModel(require('../assets/models/kangaroo.glb'), 1.5);
 
   useFrame((state, delta) => {
-    if (groupRef.current) {
-      // Variable speed with smooth ease-in-out: slow when facing us, fast when rotated away
-      const phaseShift = - Math.PI / 3;
-      const normalizedCos = (1 - Math.cos(groupRef.current.rotation.y + phaseShift)) / 2;
-      const eased = normalizedCos * normalizedCos * (3 - 2 * normalizedCos);
-      const speed = .5 + eased * 10;
-      groupRef.current.rotation.y += delta * speed;
+    if (!groupRef.current) return;
 
-      // Calculate scale based on speed (smaller when moving fast)
-      const normalizedSpeed = (speed - 0.3) / (10.3 - 0.3);
-      const scale = 1 - (normalizedSpeed * 0.98);
+    const gravity = -15;
+    
+    // Check if jump was triggered
+    if (triggerJump !== lastJumpTriggerRef.current && isGroundedRef.current) {
+      lastJumpTriggerRef.current = triggerJump;
+      // Jump strength based on charge (5 to 12 units)
+      const jumpStrength = 5 + chargeLevel * 7;
+      velocityRef.current.y = jumpStrength;
+      isGroundedRef.current = false;
+    }
+    
+    // Apply gravity
+    if (!isGroundedRef.current) {
+      velocityRef.current.y += gravity * delta;
+    }
 
-      // Track rotation for swap detection
-      const currentRotation = groupRef.current.rotation.y;
-      const rotationsSinceLastSwap = Math.floor(currentRotation / (Math.PI * 2)) - lastSwapRef.current;
+    // Update position
+    groupRef.current.position.y += velocityRef.current.y * delta;
 
-      // Swap when scale is very small AND we've completed a rotation
-      if (scale < 0.05 && rotationsSinceLastSwap >= 1) {
-        setShowController(prev => !prev);
-        lastSwapRef.current = Math.floor(currentRotation / (Math.PI * 2));
+    // Ground collision detection
+    const groundLevel = -2;
+    if (groupRef.current.position.y <= groundLevel) {
+      groupRef.current.position.y = groundLevel;
+      velocityRef.current.y = 0;
+      isGroundedRef.current = true;
+    }
+
+    // Platform collision detection
+    const platforms = [
+      { pos: [0, -2, 0], size: [8, 0.3, 1] },
+      { pos: [-4, -0.5, 0], size: [3, 0.3, 1] },
+      { pos: [3, 0.5, 0], size: [3, 0.3, 1] },
+      { pos: [-2, 2, 0], size: [3, 0.3, 1] },
+      { pos: [4, 3.5, 0], size: [3, 0.3, 1] },
+      { pos: [0, 5, 0], size: [4, 0.3, 1] },
+    ];
+
+    platforms.forEach(platform => {
+      const [px, py] = platform.pos;
+      const [sx, sy] = platform.size;
+      
+      const playerX = groupRef.current!.position.x;
+      const playerY = groupRef.current!.position.y;
+      
+      // Check if player is above platform and falling
+      if (
+        velocityRef.current.y <= 0 &&
+        playerX > px - sx / 2 &&
+        playerX < px + sx / 2 &&
+        playerY > py &&
+        playerY < py + sy + 0.5
+      ) {
+        groupRef.current!.position.y = py + sy;
+        velocityRef.current.y = 0;
+        isGroundedRef.current = true;
       }
+    });
 
-      // Apply scale to both models
-      if (controllerRef.current) {
-        controllerRef.current.scale.setScalar(scale);
-      }
-      if (bloomRef.current) {
-        bloomRef.current.scale.setScalar(scale);
-      }
+    // Bounce animation when on ground
+    if (isGroundedRef.current && chargeLevel === 0) {
+      const bounceAmount = Math.sin(state.clock.elapsedTime * 5) * 0.05;
+      groupRef.current.position.y += bounceAmount;
+    }
+
+    // Squash effect when charging
+    if (chargeLevel > 0 && isGroundedRef.current) {
+      const squash = 1 - chargeLevel * 0.3;
+      const stretch = 1 + chargeLevel * 0.15;
+      groupRef.current.scale.set(stretch, squash, 1);
+    } else {
+      // Reset scale
+      groupRef.current.scale.set(1, 1, 1);
+    }
+
+    // Tilt forward while jumping
+    if (!isGroundedRef.current) {
+      const tilt = Math.min(velocityRef.current.y / 10, 0.5);
+      groupRef.current.rotation.x = -tilt;
+    } else {
+      groupRef.current.rotation.x = 0;
     }
   });
 
   return (
-    <group ref={groupRef} position={[0, 0, -5]}>
-      {showController && (
-        <group ref={controllerRef}>
-          <primitive
-            object={controller.scene}
-            rotation={[Math.PI / 6, 0, Math.PI / 4]}
-          />
-        </group>
-      )}
-      {!showController && (
-        <group ref={bloomRef}>
-          <primitive object={bloom.scene} />
-        </group>
-      )}
+    <group ref={groupRef} position={[0, -2, 0]}>
+      <primitive object={kangaroo.scene} rotation={[0, Math.PI / 2, 0]} />
     </group>
   );
 }
 
+// Main game component
+function Game({ chargeLevel, triggerJump }: { chargeLevel: number; triggerJump: number }) {
+  return (
+    <>
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
+      
+      {/* Ground */}
+      <Platform position={[0, -2, 0]} size={[8, 0.3, 1]} />
+      
+      {/* Platforms */}
+      <Platform position={[-4, -0.5, 0]} size={[3, 0.3, 1]} />
+      <Platform position={[3, 0.5, 0]} size={[3, 0.3, 1]} />
+      <Platform position={[-2, 2, 0]} size={[3, 0.3, 1]} />
+      <Platform position={[4, 3.5, 0]} size={[3, 0.3, 1]} />
+      <Platform position={[0, 5, 0]} size={[4, 0.3, 1]} />
+      
+      {/* Kangaroo player */}
+      <Kangaroo chargeLevel={chargeLevel} triggerJump={triggerJump} />
+
+      {/* Background */}
+      <mesh position={[0, 2, -5]}>
+        <planeGeometry args={[30, 20]} />
+        <meshStandardMaterial color="#87CEEB" />
+      </mesh>
+    </>
+  );
+}
+
 export default function HomeScreen() {
+  const [chargeLevel, setChargeLevel] = useState(0);
+  const [isPressing, setIsPressing] = useState(false);
+  const [triggerJump, setTriggerJump] = useState(0);
+  const chargeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handlePressIn = () => {
+    setIsPressing(true);
+    setChargeLevel(0);
+    
+    // Gradually increase charge level
+    chargeIntervalRef.current = setInterval(() => {
+      setChargeLevel(prev => {
+        if (prev >= 1) {
+          return 1; // Max charge
+        }
+        return prev + 0.05; // Increase by 5% every 100ms
+      });
+    }, 100);
+  };
+
+  const handlePressOut = () => {
+    setIsPressing(false);
+    
+    // Clear charging interval
+    if (chargeIntervalRef.current) {
+      clearInterval(chargeIntervalRef.current);
+      chargeIntervalRef.current = null;
+    }
+
+    // Trigger the jump with current charge level
+    setTriggerJump(prev => prev + 1);
+
+    // Reset charge after jump
+    setTimeout(() => {
+      setChargeLevel(0);
+    }, 100);
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.canvasContainer}>
-        <Canvas camera={{ position: [0, 0, 10], fov: 50 }}>
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[5, 5, 5]} intensity={1} />
-          <SwappingModels />
+        <Canvas camera={{ position: [0, 2, 10], fov: 50 }}>
+          <Game chargeLevel={chargeLevel} triggerJump={triggerJump} />
         </Canvas>
       </View>
-      <View style={styles.content}>
-        <Text style={styles.title}>Bloom 3D</Text>
-        <Text style={styles.subtitle}>
-          Build 3D games with AI. Describe your game and watch it come to life.
-        </Text>
-        <Text style={styles.instructions}>
-          Tell Bloom 3D what you want to create. No coding required.
-        </Text>
-        <View style={styles.examples}>
-          <Text style={styles.examplesTitle}>Try saying:</Text>
-          <Text style={styles.example}>• "Create a platformer where I collect 10 rotating gems before time runs out"</Text>
-          <Text style={styles.example}>• "Make a racing game where I pass through checkpoints to reach the finish line"</Text>
-          <Text style={styles.example}>• "Build a maze where I collect all the golden coins to unlock the exit"</Text>
-          <Text style={styles.example}>• "Add floating crystals that give me powerups when I touch them"</Text>
+      
+      {/* Charge meter */}
+      <View style={styles.chargeMeterContainer}>
+        <Text style={styles.chargeMeterLabel}>Jump Power</Text>
+        <View style={styles.chargeMeterBg}>
+          <View 
+            style={[
+              styles.chargeMeterFill, 
+              { 
+                width: `${chargeLevel * 100}%`,
+                backgroundColor: chargeLevel < 0.5 ? '#FFA500' : chargeLevel < 0.8 ? '#FF6B00' : '#FF0000'
+              }
+            ]} 
+          />
         </View>
+      </View>
+
+      {/* Jump button */}
+      <View style={styles.controls}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.jumpButton,
+            pressed && styles.jumpButtonPressed,
+            isPressing && styles.jumpButtonCharging
+          ]}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+        >
+          <Text style={styles.jumpButtonText}>
+            {isPressing ? 'CHARGING...' : 'HOLD TO JUMP'}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Instructions */}
+      <View style={styles.instructions}>
+        <Text style={styles.instructionText}>
+          🦘 Hold the button to charge your jump, then release to leap!
+        </Text>
+        <Text style={styles.instructionText}>
+          Try to reach the highest platform!
+        </Text>
       </View>
     </View>
   );
@@ -103,56 +251,74 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
   canvasContainer: {
-    width: 300,
-    height: 300,
-    marginBottom: 32,
+    width: '100%',
+    height: '60%',
   },
-  content: {
-    maxWidth: 600,
+  chargeMeterContainer: {
+    width: '80%',
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  chargeMeterLabel: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  chargeMeterBg: {
+    width: '100%',
+    height: 30,
+    backgroundColor: '#333',
+    borderRadius: 15,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#666',
+  },
+  chargeMeterFill: {
+    height: '100%',
+    backgroundColor: '#00ff00',
+  },
+  controls: {
+    marginBottom: 20,
+  },
+  jumpButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 40,
+    paddingVertical: 20,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: '#66BB6A',
+    minWidth: 200,
     alignItems: 'center',
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 16,
-    textAlign: 'center',
+  jumpButtonPressed: {
+    backgroundColor: '#45a049',
+    transform: [{ scale: 0.95 }],
   },
-  subtitle: {
+  jumpButtonCharging: {
+    backgroundColor: '#FF9800',
+    borderColor: '#FFB74D',
+  },
+  jumpButtonText: {
+    color: '#ffffff',
     fontSize: 18,
-    color: '#a0a0a0',
-    marginBottom: 12,
-    textAlign: 'center',
-    lineHeight: 26,
+    fontWeight: 'bold',
   },
   instructions: {
-    fontSize: 16,
-    color: '#808080',
-    marginBottom: 32,
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  examples: {
-    backgroundColor: '#1a1a1a',
     padding: 20,
-    borderRadius: 12,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#333',
-    width: '100%',
+    maxWidth: '90%',
   },
-  examplesTitle: {
-    fontSize: 14,
-    color: '#ffffff',
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  example: {
-    fontSize: 14,
+  instructionText: {
     color: '#a0a0a0',
-    marginBottom: 8,
-    lineHeight: 20,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 5,
   },
 });
