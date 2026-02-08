@@ -18,10 +18,12 @@ function Platform({ position, size = [3, 0.3, 1] }: { position: [number, number,
 // Kangaroo player with charge-jump mechanics
 function Kangaroo({ 
   chargeLevel,
-  triggerJump
+  triggerJump,
+  moveDirection
 }: { 
   chargeLevel: number;
   triggerJump: number;
+  moveDirection: number; // -1 for left, 0 for none, 1 for right
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const velocityRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
@@ -34,6 +36,7 @@ function Kangaroo({
     if (!groupRef.current) return;
 
     const gravity = -15;
+    const moveSpeed = 3; // Horizontal movement speed
     
     // Check if jump was triggered
     if (triggerJump !== lastJumpTriggerRef.current && isGroundedRef.current) {
@@ -44,13 +47,22 @@ function Kangaroo({
       isGroundedRef.current = false;
     }
     
+    // Apply horizontal movement
+    velocityRef.current.x = moveDirection * moveSpeed;
+    
     // Apply gravity
     if (!isGroundedRef.current) {
       velocityRef.current.y += gravity * delta;
     }
 
     // Update position
+    groupRef.current.position.x += velocityRef.current.x * delta;
     groupRef.current.position.y += velocityRef.current.y * delta;
+
+    // Keep player within bounds
+    const maxX = 6;
+    if (groupRef.current.position.x > maxX) groupRef.current.position.x = maxX;
+    if (groupRef.current.position.x < -maxX) groupRef.current.position.x = -maxX;
 
     // Ground collision detection
     const groundLevel = -2;
@@ -114,6 +126,12 @@ function Kangaroo({
     } else {
       groupRef.current.rotation.x = 0;
     }
+
+    // Rotate to face movement direction
+    if (moveDirection !== 0) {
+      const targetRotation = moveDirection > 0 ? Math.PI / 2 : -Math.PI / 2;
+      groupRef.current.rotation.y = targetRotation;
+    }
   });
 
   return (
@@ -124,7 +142,15 @@ function Kangaroo({
 }
 
 // Main game component
-function Game({ chargeLevel, triggerJump }: { chargeLevel: number; triggerJump: number }) {
+function Game({ 
+  chargeLevel, 
+  triggerJump,
+  moveDirection 
+}: { 
+  chargeLevel: number; 
+  triggerJump: number;
+  moveDirection: number;
+}) {
   return (
     <>
       <ambientLight intensity={0.6} />
@@ -141,7 +167,11 @@ function Game({ chargeLevel, triggerJump }: { chargeLevel: number; triggerJump: 
       <Platform position={[0, 5, 0]} size={[4, 0.3, 1]} />
       
       {/* Kangaroo player */}
-      <Kangaroo chargeLevel={chargeLevel} triggerJump={triggerJump} />
+      <Kangaroo 
+        chargeLevel={chargeLevel} 
+        triggerJump={triggerJump}
+        moveDirection={moveDirection}
+      />
 
       {/* Background */}
       <mesh position={[0, 2, -5]}>
@@ -156,6 +186,7 @@ export default function HomeScreen() {
   const [chargeLevel, setChargeLevel] = useState(0);
   const [isPressing, setIsPressing] = useState(false);
   const [triggerJump, setTriggerJump] = useState(0);
+  const [moveDirection, setMoveDirection] = useState(0);
   const chargeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const handlePressIn = () => {
@@ -195,7 +226,11 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.canvasContainer}>
         <Canvas camera={{ position: [0, 2, 10], fov: 50 }}>
-          <Game chargeLevel={chargeLevel} triggerJump={triggerJump} />
+          <Game 
+            chargeLevel={chargeLevel} 
+            triggerJump={triggerJump}
+            moveDirection={moveDirection}
+          />
         </Canvas>
       </View>
       
@@ -215,8 +250,21 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Jump button */}
-      <View style={styles.controls}>
+      {/* Controls */}
+      <View style={styles.controlsRow}>
+        {/* Left button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.moveButton,
+            pressed && styles.moveButtonPressed,
+          ]}
+          onPressIn={() => setMoveDirection(-1)}
+          onPressOut={() => setMoveDirection(0)}
+        >
+          <Text style={styles.moveButtonText}>← LEFT</Text>
+        </Pressable>
+
+        {/* Jump button */}
         <Pressable
           style={({ pressed }) => [
             styles.jumpButton,
@@ -227,15 +275,27 @@ export default function HomeScreen() {
           onPressOut={handlePressOut}
         >
           <Text style={styles.jumpButtonText}>
-            {isPressing ? 'CHARGING...' : 'HOLD TO JUMP'}
+            {isPressing ? 'JUMP!' : 'HOLD'}
           </Text>
+        </Pressable>
+
+        {/* Right button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.moveButton,
+            pressed && styles.moveButtonPressed,
+          ]}
+          onPressIn={() => setMoveDirection(1)}
+          onPressOut={() => setMoveDirection(0)}
+        >
+          <Text style={styles.moveButtonText}>RIGHT →</Text>
         </Pressable>
       </View>
 
       {/* Instructions */}
       <View style={styles.instructions}>
         <Text style={styles.instructionText}>
-          🦘 Hold the button to charge your jump, then release to leap!
+          🦘 Use LEFT/RIGHT to move, HOLD to charge jump!
         </Text>
         <Text style={styles.instructionText}>
           Try to reach the highest platform!
@@ -281,17 +341,34 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#00ff00',
   },
-  controls: {
+  controlsRow: {
+    flexDirection: 'row',
+    gap: 15,
     marginBottom: 20,
+    alignItems: 'center',
+  },
+  moveButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 25,
+    paddingVertical: 20,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: '#42A5F5',
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  moveButtonPressed: {
+    backgroundColor: '#1976D2',
+    transform: [{ scale: 0.95 }],
   },
   jumpButton: {
     backgroundColor: '#4CAF50',
-    paddingHorizontal: 40,
+    paddingHorizontal: 30,
     paddingVertical: 20,
     borderRadius: 15,
     borderWidth: 3,
     borderColor: '#66BB6A',
-    minWidth: 200,
+    minWidth: 120,
     alignItems: 'center',
   },
   jumpButtonPressed: {
@@ -305,6 +382,11 @@ const styles = StyleSheet.create({
   jumpButtonText: {
     color: '#ffffff',
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  moveButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
     fontWeight: 'bold',
   },
   instructions: {
