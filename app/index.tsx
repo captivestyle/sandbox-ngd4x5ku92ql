@@ -1,6 +1,6 @@
 import { View, StyleSheet, Text } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { useNormalizedModel } from '@/hooks/useNormalizedModel';
 import { Pressable } from 'react-native';
@@ -188,6 +188,64 @@ export default function HomeScreen() {
   const [triggerJump, setTriggerJump] = useState(0);
   const [moveDirection, setMoveDirection] = useState(0);
   const chargeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const keysPressed = useRef<Set<string>>(new Set());
+
+  // Keyboard controls
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      keysPressed.current.add(key);
+
+      // Update movement direction
+      if (key === 'a' || key === 'arrowleft') {
+        setMoveDirection(-1);
+      } else if (key === 'd' || key === 'arrowright') {
+        setMoveDirection(1);
+      }
+
+      // Start charging jump with W or Space
+      if ((key === 'w' || key === ' ' || key === 'arrowup') && !isPressing) {
+        handlePressIn();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      keysPressed.current.delete(key);
+
+      // Update movement direction
+      if (key === 'a' || key === 'arrowleft') {
+        // Check if D is still pressed
+        if (keysPressed.current.has('d') || keysPressed.current.has('arrowright')) {
+          setMoveDirection(1);
+        } else {
+          setMoveDirection(0);
+        }
+      } else if (key === 'd' || key === 'arrowright') {
+        // Check if A is still pressed
+        if (keysPressed.current.has('a') || keysPressed.current.has('arrowleft')) {
+          setMoveDirection(-1);
+        } else {
+          setMoveDirection(0);
+        }
+      }
+
+      // Release jump with W or Space
+      if (key === 'w' || key === ' ' || key === 'arrowup') {
+        if (isPressing) {
+          handlePressOut();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isPressing]);
 
   const handlePressIn = () => {
     setIsPressing(true);
@@ -256,12 +314,13 @@ export default function HomeScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.moveButton,
-            pressed && styles.moveButtonPressed,
+            (pressed || moveDirection === -1) && styles.moveButtonPressed,
           ]}
           onPressIn={() => setMoveDirection(-1)}
           onPressOut={() => setMoveDirection(0)}
         >
           <Text style={styles.moveButtonText}>← LEFT</Text>
+          <Text style={styles.keyHint}>A</Text>
         </Pressable>
 
         {/* Jump button */}
@@ -277,28 +336,30 @@ export default function HomeScreen() {
           <Text style={styles.jumpButtonText}>
             {isPressing ? 'JUMP!' : 'HOLD'}
           </Text>
+          <Text style={styles.keyHint}>W / SPACE</Text>
         </Pressable>
 
         {/* Right button */}
         <Pressable
           style={({ pressed }) => [
             styles.moveButton,
-            pressed && styles.moveButtonPressed,
+            (pressed || moveDirection === 1) && styles.moveButtonPressed,
           ]}
           onPressIn={() => setMoveDirection(1)}
           onPressOut={() => setMoveDirection(0)}
         >
           <Text style={styles.moveButtonText}>RIGHT →</Text>
+          <Text style={styles.keyHint}>D</Text>
         </Pressable>
       </View>
 
       {/* Instructions */}
       <View style={styles.instructions}>
         <Text style={styles.instructionText}>
-          🦘 Use LEFT/RIGHT to move, HOLD to charge jump!
+          🦘 Use WASD / Arrow Keys or buttons to play!
         </Text>
         <Text style={styles.instructionText}>
-          Try to reach the highest platform!
+          Hold W/SPACE to charge jump, A/D to move left/right
         </Text>
       </View>
     </View>
@@ -350,7 +411,7 @@ const styles = StyleSheet.create({
   moveButton: {
     backgroundColor: '#2196F3',
     paddingHorizontal: 25,
-    paddingVertical: 20,
+    paddingVertical: 15,
     borderRadius: 15,
     borderWidth: 3,
     borderColor: '#42A5F5',
@@ -364,7 +425,7 @@ const styles = StyleSheet.create({
   jumpButton: {
     backgroundColor: '#4CAF50',
     paddingHorizontal: 30,
-    paddingVertical: 20,
+    paddingVertical: 15,
     borderRadius: 15,
     borderWidth: 3,
     borderColor: '#66BB6A',
@@ -388,6 +449,12 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  keyHint: {
+    color: '#ffffff',
+    fontSize: 12,
+    marginTop: 5,
+    opacity: 0.7,
   },
   instructions: {
     padding: 20,
